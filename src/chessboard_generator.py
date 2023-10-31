@@ -26,6 +26,6 @@ def generate_chessboard(file: str, size: Tuple[int, int], resolution: Tuple[int,
 
 if __name__ == '__main__':
     size = (8,8)
-    factor = 10
+    factor = 46
     resolution = (size[0] * factor, size[1] * factor)
-    generate_chessboard(file='result/chessboard.png', size=(8,8), resolution=resolution)
+    generate_chessboard(file='result/chessboard.png', size=size, resolution=resolution)
