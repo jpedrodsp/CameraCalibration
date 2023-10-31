@@ -4,7 +4,7 @@ import numpy as np
 from dataclasses import dataclass
 
 def make_imagegrid(folder: str, output_filepath: str):
-    images = glob.glob(folder + '/*.jpg') + glob.glob(folder + '/*.JPG')
+    images = glob.glob(folder + '/*.jpg') + glob.glob(folder + '/*.JPG') + glob.glob(folder + '/*.png') + glob.glob(folder + '/*.PNG') + glob.glob(folder + '/*.jpeg') + glob.glob(folder + '/*.JPEG')
     images_count = len(images)
     if images_count == 0:
         raise ValueError('No images found in folder "{}"'.format(folder))
