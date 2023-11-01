@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
-import os
+import os, argparse
 from typing import Tuple
 
 def generate_chessboard(file: str, size: Tuple[int, int], resolution: Tuple[int, int] = (640, 480)):
@@ -25,7 +25,15 @@ def generate_chessboard(file: str, size: Tuple[int, int], resolution: Tuple[int,
     plt.show()
 
 if __name__ == '__main__':
-    size = (8,8)
-    factor = 46
+    parser = argparse.ArgumentParser(description='Generate a chessboard image')
+    parser.add_argument('--file', type=str, default='result/chessboard.png', help='Path to the output file')
+    parser.add_argument('--width', type=int, default=8, help='Number of squares in the width')
+    parser.add_argument('--height', type=int, default=8, help='Number of squares in the height')
+    parser.add_argument('--factor', type=int, default=46, help='Size of each square in pixels')
+    args = parser.parse_args()
+    
+    filename = args.file
+    size = args.width, args.height
+    factor = args.factor
     resolution = (size[0] * factor, size[1] * factor)
-    generate_chessboard(file='result/chessboard.png', size=size, resolution=resolution)
+    generate_chessboard(file=filename, size=size, resolution=resolution)

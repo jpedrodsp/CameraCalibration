@@ -1,3 +1,5 @@
+SCALEDOWN_FACTOR = 1
+
 def get_image_folder(name: str):
     return f'images/{name}'
 

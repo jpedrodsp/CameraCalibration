@@ -3,7 +3,7 @@
 import numpy as np
 import cv2 as cv
 import glob, pickle
-import time, json
+import time, json, os
 import threading, multiprocessing, multiprocessing.pool
 import common
 
@@ -27,11 +27,12 @@ def callback_calibrate_camera(returnvalue):
         print(f'\t - [{imgpath}] Done in {diff} seconds')
 
 def calibration_worker_process(imgpath: str, chessboardSize: tuple, criteria: tuple, objp: np.ndarray):
+        scaledown_factor = common.SCALEDOWN_FACTOR
         print(f'\t - [{imgpath}] Starting')
         start = time.time()
         img = cv.imread(imgpath)
         # Resize the image 2 times smaller
-        factor = 1 / 2
+        factor = 1 / scaledown_factor
         img = cv.resize(img, (0,0), fx=factor, fy=factor, interpolation=cv.INTER_NEAREST)
         gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
         # Find the chess board corners
@@ -51,12 +52,12 @@ def calibration_worker_process(imgpath: str, chessboardSize: tuple, criteria: tu
         return (imgpath, objpoints, imgpoints, diff)
 
 
-def calibrate_camera(src_name: str):
+def calibrate_camera(src_name: str, chessboard_filename='result/chessboard.png', chessboard_size=(7,7), chessboard_square_size=15):
     ################ FIND CHESSBOARD CORNERS - OBJECT POINTS AND IMAGE POINTS #############################
     print(f"Step 1: Finding chessboard corners for {src_name}")
+    scaledown_factor = common.SCALEDOWN_FACTOR
 
-    chessboardSize = (7,7)   # number of inner corners per a chessboard row and column
-    frameSize = (368,368)    # 8x images with 46 pixels per square = 368 pixels
+    chessboardSize = chessboard_size   # number of inner corners per a chessboard row and column
     # termination criteria
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
@@ -64,12 +65,16 @@ def calibrate_camera(src_name: str):
     objp = np.zeros((chessboardSize[0] * chessboardSize[1], 3), np.float32)
     objp[:,:2] = np.mgrid[0:chessboardSize[0],0:chessboardSize[1]].T.reshape(-1,2)
 
-    size_of_chessboard_squares_mm = 15
+    size_of_chessboard_squares_mm = chessboard_square_size
     objp = objp * size_of_chessboard_squares_mm
 
     images = []
     for image_type in common.get_image_types():
         images += glob.glob(common.get_image_folder(src_name) + '/*.' + image_type)
+    # correspond to the size of the image we are using (in pixels)
+    candidate = cv.imread(images[0])
+    print(f'\t - Using {candidate.shape[0]}x{candidate.shape[1]} image size')
+    photo_framesize = (candidate.shape[0] // scaledown_factor, candidate.shape[1] // scaledown_factor)
                 
     # Create a pool of processes. Wait for them to complete.
     num_processes = multiprocessing.cpu_count()
@@ -87,7 +92,7 @@ def calibrate_camera(src_name: str):
     ############## CALIBRATION #######################################################
     print(f"Step 2: Calibrating camera {src_name}")
 
-    ret, cameraMatrix, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, frameSize, None, None)
+    ret, cameraMatrix, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, photo_framesize, None, None)
 
     # Save the camera calibration result for later use (we won't worry about rvecs / tvecs)
     pickle.dump((cameraMatrix, dist), open( f"result/{src_name}_calibration.pkl", "wb" ))
@@ -98,23 +103,38 @@ def calibrate_camera(src_name: str):
             'matrix': cameraMatrix.tolist(),
         }
         f.write(json.dumps(data))
+    print(f'cameraMatrix={cameraMatrix}')
         
 
 
     ############## UNDISTORTION #####################################################
     print(f"Step 3: Undistorting images for {src_name}")
 
-    img = cv.imread('result/chessboard.png')
+    img = cv.imread(chessboard_filename)
+    if img is None:
+        raise ValueError(f'Could not read the chessboard image "{chessboard_filename}"')
     h, w = img.shape[:2]
+    print(f'chessboard img.shape={img.shape}')
     newCameraMatrix, roi = cv.getOptimalNewCameraMatrix(cameraMatrix, dist, (w,h), 1, (w,h))
+    print(f'newCameraMatrix={newCameraMatrix}')
+    print(f'roi={roi}')
 
 
     # Undistort
     dst = cv.undistort(img, cameraMatrix, dist, None, newCameraMatrix)
+    print(f'dst = {dst}')
+    if dst is None or dst.size == 0:
+        raise ValueError('Could not undistort the image')
 
     # crop the image
     x, y, w, h = roi
+    print(f'x={x}, y={y}, w={w}, h={h}')
+    print(f'img.shape={img.shape}')
+    print(f'dst.shape={dst.shape}')
     dst = dst[y:y+h, x:x+w]
+    print(f'dst[{y} to {y+h}, {x} to {x+w}]')
+    if dst is None or dst.size == 0:
+        raise ValueError('Could not crop the image')
     cv.imwrite(f'result/{src_name}_caliResult1.png', dst)
 
 
@@ -122,10 +142,20 @@ def calibrate_camera(src_name: str):
     # Undistort with Remapping
     mapx, mapy = cv.initUndistortRectifyMap(cameraMatrix, dist, None, newCameraMatrix, (w,h), 5)
     dst = cv.remap(img, mapx, mapy, cv.INTER_LINEAR)
+    if dst is None or dst.size == 0:
+        raise ValueError('Could not undistort the image with remapping')
 
     # crop the image
     x, y, w, h = roi
+    print(f'x={x}, y={y}, w={w}, h={h}')
+    print(f'img.shape={img.shape}')
     dst = dst[y:y+h, x:x+w]
+    if dst is None:
+        raise ValueError('Could not crop the image after remapping')
+    if x == 0 and y == 0 and w == img.shape[1] and h == img.shape[0]:
+        raise ValueError('The image was not cropped after remapping')
+    print(dst)
+    
     cv.imwrite(f'result/{src_name}_caliResult2.png', dst)
 
 
@@ -145,12 +175,17 @@ def calibrate_camera(src_name: str):
     return totalerror
 
 if __name__ == '__main__':
+    if not os.path.exists('result'):
+        os.makedirs('result')
+        
+    # content = ['imgMotoE22', 'imgNote12']
     content = ['camera1_motox4-traseira', 'camera2_nintendo-dsi-traseira']
     for src_name in content:
         objpoints = []
         imgpoints = []
         start = time.time()
-        err = calibrate_camera(src_name)
+        #err = calibrate_camera(src_name, chessboard_filename='result/chessboard8x7.png', chessboard_size=(7,6), chessboard_square_size=23)
+        err = calibrate_camera(src_name, chessboard_filename='result/chessboard8x8.png', chessboard_size=(7,7), chessboard_square_size=15)
         end = time.time()
         diff = end - start
         print(f"Reprojection error for {src_name} = {err}")
